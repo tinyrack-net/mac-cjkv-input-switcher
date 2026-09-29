@@ -29,12 +29,44 @@ struct HotKey: Codable, Equatable {
             kVK_Space: "Space", kVK_Return: "Return", kVK_Tab: "Tab",
             kVK_Delete: "Delete", kVK_Escape: "Esc", kVK_ForwardDelete: "⌦",
             kVK_LeftArrow: "←", kVK_RightArrow: "→", kVK_UpArrow: "↑", kVK_DownArrow: "↓",
+            kVK_Home: "Home", kVK_End: "End", kVK_PageUp: "Page Up", kVK_PageDown: "Page Down",
             kVK_F1: "F1", kVK_F2: "F2", kVK_F3: "F3", kVK_F4: "F4",
             kVK_F5: "F5", kVK_F6: "F6", kVK_F7: "F7", kVK_F8: "F8",
             kVK_F9: "F9", kVK_F10: "F10", kVK_F11: "F11", kVK_F12: "F12"
         ]
         if let name = names[keyCode] { return name }
+        if let character = character(for: keyCode) { return character.uppercased() }
         return "Key \(keyCode)"
+    }
+
+    // Letters, digits and punctuation are missing from the table above, so their
+    // name is resolved through the keyboard layout.  The ASCII-capable layout is
+    // used because the active CJKV layout reports Hangul or Kana for the same
+    // physical key.
+    private static func character(for keyCode: Int) -> String? {
+        guard let source = TISCopyCurrentASCIICapableKeyboardLayoutInputSource()?.takeRetainedValue(),
+              let pointer = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData) else { return nil }
+        let layoutData = Unmanaged<CFData>.fromOpaque(pointer).takeUnretainedValue() as Data
+        var deadKeyState: UInt32 = 0
+        var length = 0
+        var characters = [UniChar](repeating: 0, count: 4)
+        let status = layoutData.withUnsafeBytes { buffer -> OSStatus in
+            guard let layout = buffer.bindMemory(to: UCKeyboardLayout.self).baseAddress else { return -1 }
+            return UCKeyTranslate(layout, UInt16(keyCode), UInt16(kUCKeyActionDisplay), 0, UInt32(LMGetKbdType()),
+                                  OptionBits(kUCKeyTranslateNoDeadKeysBit), &deadKeyState,
+                                  characters.count, &length, &characters)
+        }
+        guard status == noErr, length > 0 else { return nil }
+        let text = String(utf16CodeUnits: characters, count: length)
+        return Self.isPrintable(text) ? text : nil
+    }
+
+    // UCKeyTranslate answers with control codes and function-key values for
+    // keys that have no printable character, so those are filtered out.
+    private static func isPrintable(_ text: String) -> Bool {
+        !text.isEmpty && text.unicodeScalars.allSatisfy { scalar in
+            scalar.value >= 0x20 && scalar.value != 0x7F && !(0xF700...0xF8FF).contains(scalar.value)
+        }
     }
 }
 
@@ -294,7 +326,7 @@ final class SettingsWindowController: NSWindowController {
             guard let self, self.isRecording else { return event }
             let flags = event.modifierFlags
             let modifiers = Self.carbonModifiers(from: flags)
-            guard modifiers != 0 else { NSSound.beep(); return nil }
+            guard modifiers != 0, !Self.isModifierKey(event.keyCode) else { NSSound.beep(); return nil }
             let value = HotKey(keyCode: Int(event.keyCode), modifiers: modifiers)
             hotKeyManager?.update(value)
             self.shortcutLabel.stringValue = value.displayName
@@ -302,6 +334,12 @@ final class SettingsWindowController: NSWindowController {
             self.recordButton.title = "단축키 변경"
             return nil
         }
+    }
+
+    private static func isModifierKey(_ keyCode: UInt16) -> Bool {
+        [kVK_Command, kVK_Shift, kVK_CapsLock, kVK_Option, kVK_Control,
+         kVK_RightCommand, kVK_RightShift, kVK_RightOption, kVK_RightControl, kVK_Function]
+            .contains(Int(keyCode))
     }
 
     private static func carbonModifiers(from flags: NSEvent.ModifierFlags) -> UInt32 {
