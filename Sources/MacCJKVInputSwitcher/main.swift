@@ -19,12 +19,22 @@ private func inputSourceID(_ source: TISInputSource) -> String? {
     return Unmanaged<CFString>.fromOpaque(pointer).takeUnretainedValue() as String
 }
 
+// Some macOS versions expose InputModeID on CJKV input sources and some do not:
+// the Korean source on recent versions only reports its language, so both
+// signals are used.  The language list matches the check Kawa uses.
 private func isCJKV(_ id: String) -> Bool {
     let properties = [kTISPropertyInputSourceID as String: id] as CFDictionary
     guard let list = TISCreateInputSourceList(properties, false)?.takeRetainedValue() as? [TISInputSource],
-          let source = list.first,
-          let pointer = TISGetInputSourceProperty(source, "InputModeID" as CFString) else { return false }
-    return (Unmanaged<CFString>.fromOpaque(pointer).takeUnretainedValue() as String).isEmpty == false
+          let source = list.first else { return false }
+    if let pointer = TISGetInputSourceProperty(source, "InputModeID" as CFString) {
+        let mode = Unmanaged<CFString>.fromOpaque(pointer).takeUnretainedValue() as String
+        if !mode.isEmpty { return true }
+    }
+    guard let pointer = TISGetInputSourceProperty(source, kTISPropertyInputSourceLanguages) else { return false }
+    let languages = Unmanaged<CFArray>.fromOpaque(pointer).takeUnretainedValue() as NSArray
+    return languages.compactMap { $0 as? String }.contains { language in
+        language == "ko" || language == "ja" || language == "vi" || language.hasPrefix("zh")
+    }
 }
 
 private func currentInputSourceID() -> String? {
