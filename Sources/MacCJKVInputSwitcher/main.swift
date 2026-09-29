@@ -86,6 +86,27 @@ final class HotKeyStore {
     }
 }
 
+final class DelayStore {
+    static let shared = DelayStore()
+    static let `default` = 150
+    static let range = 50...500
+    private let delayKey = "transitionDelay"
+    private let defaults = UserDefaults.standard
+
+    // A missing key answers 0, so anything outside the range means "not
+    // configured yet" and falls back to the default.
+    var milliseconds: Int {
+        get {
+            let stored = defaults.integer(forKey: delayKey)
+            guard Self.range.contains(stored) else { return Self.default }
+            return stored
+        }
+        set {
+            defaults.set(min(max(newValue, Self.range.lowerBound), Self.range.upperBound), forKey: delayKey)
+        }
+    }
+}
+
 private func loadInputSources() -> [String] {
     let properties: [String: Any] = [
         kTISPropertyInputSourceCategory as String: kTISCategoryKeyboardInputSource as Any,
@@ -151,7 +172,7 @@ final class InputSourceSwitcher {
         func attempt(_ remaining: Int) {
             self.selectInputSource(nextSource)
             if currentInputSourceID() != nextSource && remaining > 0 {
-                DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(150)) { attempt(remaining - 1) }
+                DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(DelayStore.shared.milliseconds)) { attempt(remaining - 1) }
                 return
             }
             self.rebindWindow?.orderOut(nil)
@@ -160,7 +181,7 @@ final class InputSourceSwitcher {
             self.transitionInProgress = false
         }
         if needsWorkaround {
-            DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(150)) { attempt(2) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(DelayStore.shared.milliseconds)) { attempt(2) }
         } else { attempt(0) }
     }
 
@@ -192,7 +213,6 @@ final class HotKeyManager {
     private var eventHotKey: EventHotKeyRef?
     private var handler: EventHandlerRef?
     var onTriggered: (() -> Void)?
-    var onChanged: ((HotKey) -> Void)?
 
     init() {
         hotKey = HotKeyStore.shared.hotKey
@@ -207,7 +227,6 @@ final class HotKeyManager {
         hotKey = newValue
         HotKeyStore.shared.hotKey = newValue
         register()
-        onChanged?(newValue)
     }
 
     private func installHandler() {
@@ -239,6 +258,8 @@ final class SettingsWindowController: NSWindowController {
     private let shortcutLabel = NSTextField(labelWithString: "")
     private let recordButton = NSButton(title: "단축키 변경", target: nil, action: nil)
     private let loginItemCheckbox = NSButton(checkboxWithTitle: "로그인 시 자동으로 시작", target: nil, action: nil)
+    private let delaySlider = NSSlider(value: 0, minValue: 0, maxValue: 1, target: nil, action: nil)
+    private let delayValueLabel = NSTextField(labelWithString: "")
     private var monitor: Any?
     private var isRecording = false
 
@@ -256,21 +277,45 @@ final class SettingsWindowController: NSWindowController {
         shortcutLabel.layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
         shortcutLabel.layer?.cornerRadius = 6
 
+        let description = NSTextField(labelWithString: "전역 단축키")
+        let hint = NSTextField(wrappingLabelWithString: "원하는 키 조합을 누르면 저장됩니다. 최소 한 개의 보조 키(⌃, ⌥, ⇧, ⌘)를 포함하세요.")
+        hint.textColor = .secondaryLabelColor
+        hint.font = .systemFont(ofSize: 12)
+
+        delayValueLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
+        delayValueLabel.textColor = .secondaryLabelColor
+        delayValueLabel.stringValue = Self.delayText(DelayStore.shared.milliseconds)
+        delaySlider.minValue = Double(DelayStore.range.lowerBound)
+        delaySlider.maxValue = Double(DelayStore.range.upperBound)
+        delaySlider.doubleValue = Double(DelayStore.shared.milliseconds)
+        delaySlider.numberOfTickMarks = 10
+        delaySlider.allowsTickMarkValuesOnly = false
+        delaySlider.isContinuous = true
+        delaySlider.target = self
+        delaySlider.action = #selector(delayChanged(_:))
+        let delayTitle = NSTextField(labelWithString: "전환 지연")
+        let delayRow = NSStackView(views: [delayTitle, delayValueLabel])
+        delayRow.orientation = .horizontal
+        delayRow.spacing = 8
+        let delayHint = NSTextField(wrappingLabelWithString: "CJKV 입력기로 전환할 때 기다리는 시간입니다. 전환이 자주 실패하면 값을 늘려 보세요.")
+        delayHint.textColor = .secondaryLabelColor
+        delayHint.font = .systemFont(ofSize: 12)
+
         loginItemCheckbox.target = self
         loginItemCheckbox.action = #selector(toggleLoginItem)
         loginItemCheckbox.state = LoginItemManager.shared.isEnabled ? .on : .off
         let loginItemHint = NSTextField(wrappingLabelWithString: "켜면 macOS에 로그인할 때 메뉴 막대 앱이 자동으로 실행됩니다. 끄면 다음 로그인부터 실행되지 않습니다.")
         loginItemHint.textColor = .secondaryLabelColor
         loginItemHint.font = .systemFont(ofSize: 12)
-        let separator = NSBox()
-        separator.boxType = .separator
 
-        let description = NSTextField(labelWithString: "전역 단축키")
-        let hint = NSTextField(wrappingLabelWithString: "원하는 키 조합을 누르면 저장됩니다. 최소 한 개의 보조 키(⌃, ⌥, ⇧, ⌘)를 포함하세요.")
-        hint.textColor = .secondaryLabelColor
-        hint.font = .systemFont(ofSize: 12)
+        let hotKeySeparator = NSBox()
+        hotKeySeparator.boxType = .separator
+        let delaySeparator = NSBox()
+        delaySeparator.boxType = .separator
 
-        let stack = NSStackView(views: [description, shortcutLabel, recordButton, hint, separator, loginItemCheckbox, loginItemHint])
+        let stack = NSStackView(views: [description, shortcutLabel, recordButton, hint, hotKeySeparator,
+                                        delayRow, delaySlider, delayHint, delaySeparator,
+                                        loginItemCheckbox, loginItemHint])
         stack.orientation = .vertical
         stack.spacing = 10
         stack.alignment = .leading
@@ -282,8 +327,14 @@ final class SettingsWindowController: NSWindowController {
             stack.topAnchor.constraint(equalTo: window.contentView!.topAnchor, constant: 22),
             shortcutLabel.widthAnchor.constraint(equalTo: stack.widthAnchor),
             shortcutLabel.heightAnchor.constraint(equalToConstant: 34),
-            separator.widthAnchor.constraint(equalTo: stack.widthAnchor)
+            hotKeySeparator.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            delaySeparator.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            delaySlider.widthAnchor.constraint(equalTo: stack.widthAnchor)
         ])
+        // Size the window to its content so wrapped hints are never clipped.
+        window.contentView?.layoutSubtreeIfNeeded()
+        window.setContentSize(NSSize(width: 420, height: stack.frame.height + 44))
+        window.center()
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -305,7 +356,18 @@ final class SettingsWindowController: NSWindowController {
     override func showWindow(_ sender: Any?) {
         super.showWindow(sender)
         loginItemCheckbox.state = LoginItemManager.shared.isEnabled ? .on : .off
+        let delay = DelayStore.shared.milliseconds
+        delaySlider.doubleValue = Double(delay)
+        delayValueLabel.stringValue = Self.delayText(delay)
         installMonitorIfNeeded()
+    }
+
+    private static func delayText(_ milliseconds: Int) -> String { "\(milliseconds)ms" }
+
+    @objc private func delayChanged(_ sender: NSSlider) {
+        // Snap to 10 ms so the value stays readable while dragging.
+        DelayStore.shared.milliseconds = Int((sender.doubleValue / 10).rounded()) * 10
+        delayValueLabel.stringValue = Self.delayText(DelayStore.shared.milliseconds)
     }
 
     @objc private func toggleLoginItem(_ sender: NSButton) {
@@ -426,16 +488,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         hotKeyManager = HotKeyManager()
         hotKeyManager?.onTriggered = { [weak self] in self?.switcher.selectNextInputSource() }
-        hotKeyManager?.onChanged = { [weak self] _ in self?.buildMenu() }
     }
 
     private func buildMenu() {
         let menu = NSMenu()
-        let hotKeyTitle = HotKeyStore.shared.hotKey.displayName
-        let switchItem = NSMenuItem(title: "입력기 전환 (\(hotKeyTitle))", action: #selector(triggerSwitch), keyEquivalent: "")
-        switchItem.target = self
-        menu.addItem(switchItem)
-        menu.addItem(.separator())
         let settings = NSMenuItem(title: "설정…", action: #selector(showSettings), keyEquivalent: ",")
         settings.keyEquivalentModifierMask = [.command]
         settings.target = self
@@ -447,8 +503,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(quit)
         statusItem.menu = menu
     }
-
-    @objc private func triggerSwitch() { switcher.selectNextInputSource() }
 
     @objc private func showSettings() {
         if settingsController == nil { settingsController = SettingsWindowController(hotKey: HotKeyStore.shared.hotKey) }
