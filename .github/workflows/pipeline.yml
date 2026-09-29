@@ -62,18 +62,32 @@ jobs:
           Scripts/build-universal.sh dist/MacCJKVInputSwitcher.app
       - name: Sign app
         env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_DEVELOPER_ID: ${{ secrets.APPLE_DEVELOPER_ID }}
         run: |
-          identity="-"
-          if [[ -n "$APPLE_DEVELOPER_ID" ]] && security find-identity -v -p codesigning | grep -Fq "$APPLE_DEVELOPER_ID"; then identity="$APPLE_DEVELOPER_ID"; fi
-          codesign --force --deep --options runtime --sign "$identity" dist/MacCJKVInputSwitcher.app
-          printf "%s\n" "$identity" > dist/signing-identity
+          set -euo pipefail
+          test -n "$APPLE_CERTIFICATE"
+          test -n "$APPLE_CERTIFICATE_PASSWORD"
+          test -n "$APPLE_DEVELOPER_ID"
+          keychain="$RUNNER_TEMP/release.keychain-db"
+          certificate="$RUNNER_TEMP/developer-id.p12"
+          keychain_password="$(openssl rand -hex 32)"
+          printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$certificate"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$certificate" -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -k "$keychain_password" "$keychain"
+          security list-keychains -d user -s "$keychain"
+          security find-identity -v -p codesigning "$keychain" | grep -Fq "$APPLE_DEVELOPER_ID"
+          codesign --force --deep --timestamp --options runtime --keychain "$keychain" --sign "$APPLE_DEVELOPER_ID" dist/MacCJKVInputSwitcher.app
       - name: Package DMG
         run: Scripts/package-dmg.sh dist/MacCJKVInputSwitcher.app "${GITHUB_REF_NAME#v}"
       - name: Verify package
         run: |
           codesign --verify --deep --strict dist/MacCJKVInputSwitcher.app
-          if [[ "$(cat dist/signing-identity)" != "-" ]]; then spctl --assess --type execute dist/MacCJKVInputSwitcher.app; fi
+          spctl --assess --type execute dist/MacCJKVInputSwitcher.app
           shasum -a 256 dist/MacCJKVInputSwitcher-*.dmg > dist/SHA256SUMS
       - name: Generate Homebrew Cask
         run: |
