@@ -32,7 +32,7 @@ ABC/U.S. 같은 일반 키보드 레이아웃은 즉시 전환합니다.
 2. 시스템 설정 > 키보드 > 키보드 단축키 > 입력 소스에서 "이전 입력 소스 선택" 단축키가 켜져 있어야 합니다.
    기본값(Control-Space)이 아니어도 되며, 이 도구는 설정된 단축키를 그대로 읽어 사용합니다.
 3. 손쉬운 사용(Accessibility) 권한이 필요합니다. 단축키를 합성하려면 macOS가 이 권한을 요구합니다.
-   시스템 설정 > 개인정보 보호 및 보안 > 손쉬운 사용에서 `~/Library/LaunchAgents` 대신 실제 실행 파일인 `~/.local/bin/MacCJKVInputSwitcher`를 추가합니다.
+   시스템 설정 > 개인정보 보호 및 보안 > 손쉬운 사용에서 `+` 버튼으로 실제 실행 파일인 `~/.local/bin/MacCJKVInputSwitcher`를 추가하고, 권한을 켠 뒤 `make restart`로 다시 시작합니다.
    다시 빌드해 설치하면 서명이 바뀌므로 권한을 다시 확인해야 할 수 있습니다.
 
 ## 요구 사항
@@ -72,6 +72,8 @@ make uninstall
 - 입력 소스 목록에 CJKV가 아닌 입력기가 있는지
 - "Previous input source shortcut"이 켜져 있는지
 - "Accessibility permission"이 granted인지
+
+`Accessibility permission`은 이 명령을 실행한 프로세스 기준으로 표시됩니다. 실제로 동작하는 데몬의 권한 상태는 시작할 때 남는 로그를 확인하는 편이 정확합니다.
 
 단축키를 눌렀을 때 실제로 어떤 경로로 전환되었는지는 로그에서 확인할 수 있습니다.
 
