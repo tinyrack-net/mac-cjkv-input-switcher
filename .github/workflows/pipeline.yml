@@ -56,9 +56,9 @@ jobs:
           path: dist
       - name: Assemble Universal app
         run: |
-          mkdir -p dist/arm64 dist/x86_64
-          mv dist/app-arm64/Contents dist/arm64/
-          mv dist/app-x86_64/Contents dist/x86_64/
+          mkdir -p dist/arm64/MacCJKVInputSwitcher.app dist/x86_64/MacCJKVInputSwitcher.app
+          mv dist/app-arm64/Contents dist/arm64/MacCJKVInputSwitcher.app/
+          mv dist/app-x86_64/Contents dist/x86_64/MacCJKVInputSwitcher.app/
           Scripts/build-universal.sh dist/MacCJKVInputSwitcher.app
       - name: Sign app
         env:
