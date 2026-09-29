@@ -1,56 +1,41 @@
 SHELL := /bin/zsh
-
 APP_NAME := MacCJKVInputSwitcher
 PACKAGE_ROOT := $(CURDIR)
 BUILD_BIN := $(PACKAGE_ROOT)/.build/release/$(APP_NAME)
-INSTALL_DIR := $(HOME)/.local/bin
-INSTALL_BIN := $(INSTALL_DIR)/$(APP_NAME)
+APP_DIR := $(PACKAGE_ROOT)/dist/$(APP_NAME).app
+APP_BIN := $(APP_DIR)/Contents/MacOS/$(APP_NAME)
+VERSION := $(shell /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Info.plist)
 PLIST_LABEL := com.winetree.MacCJKVInputSwitcher
-PLIST_TEMPLATE := $(PACKAGE_ROOT)/LaunchAgents/$(PLIST_LABEL).plist
 PLIST_DIR := $(HOME)/Library/LaunchAgents
 PLIST := $(PLIST_DIR)/$(PLIST_LABEL).plist
-LOG_DIR := $(HOME)/Library/Logs
 UID := $(shell id -u)
-
-.PHONY: build install uninstall restart status logs clean
-
+.PHONY: build app universal dmg install uninstall restart status logs clean release-prepare release-finalize
 build:
-	@set -o pipefail; \
-	log=$$(mktemp); \
-	if swift build -c release 2>&1 | tee "$$log"; then \
-		rm -f "$$log"; \
-	else \
-		if rg -q 'precompiled file .*\.build|missing required module .SwiftShims.' "$$log"; then \
-			echo "Stale SwiftPM module cache detected; cleaning and retrying..." >&2; \
-			rm -f "$$log"; \
-			swift package clean; \
-			swift build -c release; \
-		else \
-			status=$$?; rm -f "$$log"; exit $$status; \
-		fi; \
-	fi
-
-install: build
-	@mkdir -p "$(INSTALL_DIR)" "$(PLIST_DIR)" "$(LOG_DIR)"
-	cp "$(BUILD_BIN)" "$(INSTALL_BIN)"
-	sed -e 's#__INSTALL_PATH__#$(INSTALL_DIR)#' -e 's#__HOME__#$(HOME)#' \
-		"$(PLIST_TEMPLATE)" > "$(PLIST)"
-	-launchctl bootout gui/$(UID) "$(PLIST)" 2>/dev/null
-	launchctl bootstrap gui/$(UID) "$(PLIST)"
-	@echo "Installed: Ctrl+Option+Shift+Space toggles configured input sources"
-
+	@swift build -c release
+app: build
+	@mkdir -p dist
+	@Scripts/build-app.sh "$(BUILD_BIN)" "$(APP_DIR)"
+universal:
+	@Scripts/build-universal.sh "$(APP_DIR)"
+dmg: universal
+	@Scripts/package-dmg.sh "$(APP_DIR)" "$(VERSION)"
+install: app
+	@mkdir -p "$(HOME)/.local/bin" "$(PLIST_DIR)" "$(HOME)/Library/Logs"
+	@cp "$(APP_BIN)" "$(HOME)/.local/bin/$(APP_NAME)"
+	@sed -e 's#__INSTALL_PATH__#$(HOME)/.local/bin#' -e 's#__HOME__#$(HOME)#' LaunchAgents/$(PLIST_LABEL).plist > "$(PLIST)"
+	@-launchctl bootout gui/$(UID) "$(PLIST)" 2>/dev/null
+	@launchctl bootstrap gui/$(UID) "$(PLIST)"
 uninstall:
-	-launchctl bootout gui/$(UID) "$(PLIST)" 2>/dev/null
-	rm -f "$(PLIST)" "$(INSTALL_BIN)"
-	@echo "Uninstalled $(APP_NAME)"
-
+	@-launchctl bootout gui/$(UID) "$(PLIST)" 2>/dev/null
+	@rm -f "$(PLIST)" "$(HOME)/.local/bin/$(APP_NAME)"
 restart: install
-
 status:
-	launchctl print gui/$(UID)/$(PLIST_LABEL)
-
+	@launchctl print gui/$(UID)/$(PLIST_LABEL)
 logs:
-	tail -f "$(LOG_DIR)/$(APP_NAME).log"
-
+	@tail -f "$(HOME)/Library/Logs/$(APP_NAME).log"
 clean:
-	swift package clean
+	@swift package clean
+release-prepare:
+	@Scripts/release-prepare.sh $(BUMP)
+release-finalize:
+	@Scripts/release-finalize.sh
