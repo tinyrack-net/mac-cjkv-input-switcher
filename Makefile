@@ -12,13 +12,7 @@ PLIST := $(PLIST_DIR)/$(PLIST_LABEL).plist
 LOG_DIR := $(HOME)/Library/Logs
 UID := $(shell id -u)
 
-.PHONY: build install uninstall restart status logs diagnose permission clean
-
-# Optional stable signing identity (for example a self-signed certificate named
-# "MacCJKVInputSwitcher Dev").  Without it the binary is only linker-signed, and
-# macOS pins the Accessibility grant to its cdhash, so the permission has to be
-# granted again after every rebuild.
-SIGN_IDENTITY ?=
+.PHONY: build install uninstall restart status logs clean
 
 build:
 	@set -o pipefail; \
@@ -37,9 +31,6 @@ build:
 	fi
 
 install: build
-	@if [ -n "$(SIGN_IDENTITY)" ]; then \
-		codesign --force --sign "$(SIGN_IDENTITY)" "$(BUILD_BIN)"; \
-	fi
 	@mkdir -p "$(INSTALL_DIR)" "$(PLIST_DIR)" "$(LOG_DIR)"
 	cp "$(BUILD_BIN)" "$(INSTALL_BIN)"
 	sed -e 's#__INSTALL_PATH__#$(INSTALL_DIR)#' -e 's#__HOME__#$(HOME)#' \
@@ -60,14 +51,6 @@ status:
 
 logs:
 	tail -f "$(LOG_DIR)/$(APP_NAME).log"
-
-diagnose:
-	$(BUILD_BIN) --diagnose
-
-permission:
-	kill -USR2 "$$(pgrep $(APP_NAME) | head -1)"
-	sleep 0.3
-	tail -2 "$(LOG_DIR)/$(APP_NAME).log"
 
 clean:
 	swift package clean
