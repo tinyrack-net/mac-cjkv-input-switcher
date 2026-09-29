@@ -29,7 +29,9 @@ jobs:
       - name: Build executable
         run: swift build -c release --arch ${{ matrix.arch }}
       - name: Build app bundle
-        run: Scripts/build-app.sh .build/${{ matrix.arch }}/release/MacCJKVInputSwitcher dist/${{ matrix.arch }}/MacCJKVInputSwitcher.app
+        run: |
+          BIN_PATH="$(swift build --show-bin-path -c release --arch ${{ matrix.arch }})/MacCJKVInputSwitcher"
+          Scripts/build-app.sh "$BIN_PATH" dist/${{ matrix.arch }}/MacCJKVInputSwitcher.app
       - name: Verify bundle
         run: |
           test -x dist/${{ matrix.arch }}/MacCJKVInputSwitcher.app/Contents/MacOS/MacCJKVInputSwitcher
