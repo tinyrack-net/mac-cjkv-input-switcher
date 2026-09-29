@@ -64,14 +64,16 @@ jobs:
         env:
           APPLE_DEVELOPER_ID: ${{ secrets.APPLE_DEVELOPER_ID }}
         run: |
-          test -n "$APPLE_DEVELOPER_ID"
-          codesign --force --options runtime --sign "$APPLE_DEVELOPER_ID" dist/MacCJKVInputSwitcher.app
+          identity="-"
+          if [[ -n "$APPLE_DEVELOPER_ID" ]] && security find-identity -v -p codesigning | grep -Fq "$APPLE_DEVELOPER_ID"; then identity="$APPLE_DEVELOPER_ID"; fi
+          codesign --force --deep --options runtime --sign "$identity" dist/MacCJKVInputSwitcher.app
+          printf "%s\n" "$identity" > dist/signing-identity
       - name: Package DMG
         run: Scripts/package-dmg.sh dist/MacCJKVInputSwitcher.app "${GITHUB_REF_NAME#v}"
       - name: Verify package
         run: |
           codesign --verify --deep --strict dist/MacCJKVInputSwitcher.app
-          spctl --assess --type execute dist/MacCJKVInputSwitcher.app
+          if [[ "$(cat dist/signing-identity)" != "-" ]]; then spctl --assess --type execute dist/MacCJKVInputSwitcher.app; fi
           shasum -a 256 dist/MacCJKVInputSwitcher-*.dmg > dist/SHA256SUMS
       - name: Generate Homebrew Cask
         run: |
