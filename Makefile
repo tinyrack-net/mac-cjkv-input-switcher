@@ -12,7 +12,7 @@ PLIST := $(PLIST_DIR)/$(PLIST_LABEL).plist
 LOG_DIR := $(HOME)/Library/Logs
 UID := $(shell id -u)
 
-.PHONY: build install uninstall restart status logs clean
+.PHONY: build install uninstall restart status logs diagnose clean
 
 build:
 	@set -o pipefail; \
@@ -51,6 +51,9 @@ status:
 
 logs:
 	tail -f "$(LOG_DIR)/$(APP_NAME).log"
+
+diagnose:
+	$(BUILD_BIN) --diagnose
 
 clean:
 	swift package clean
