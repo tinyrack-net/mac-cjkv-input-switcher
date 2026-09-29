@@ -23,20 +23,20 @@ private func log(_ message: String) {
     fputs("\(message)\n", stderr)
 }
 
-// Posting the input source shortcut needs Accessibility permission.  Without
-// it the synthesized key event is dropped silently, which would make the
-// workaround below look broken instead of unprivileged.
+// Posting the input source shortcut needs Accessibility permission.  The value
+// AXIsProcessTrusted() reports is not always accurate for a job started by
+// launchd, so it only decides whether to ask for the permission: whether the
+// shortcut really works is judged by the result of the switch itself.
 private var accessibilityPromptRequested = false
 
-private func hasAccessibilityPermission(promptIfNeeded: Bool) -> Bool {
-    if AXIsProcessTrusted() { return true }
-    guard promptIfNeeded, !accessibilityPromptRequested else { return false }
+private func requestAccessibilityPermissionIfNeeded() {
+    if AXIsProcessTrusted() { return }
+    guard !accessibilityPromptRequested else { return }
     accessibilityPromptRequested = true
-    log("Accessibility permission is required to send the input source switch shortcut.")
-    log("Enable MacCJKVInputSwitcher in System Settings > Privacy & Security > Accessibility, then restart this tool.")
+    log("Accessibility permission is not granted for this process.")
+    log("Grant it in System Settings > Privacy & Security > Accessibility, then restart this tool.")
     let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
     _ = AXIsProcessTrustedWithOptions(options)
-    return false
 }
 
 private func loadInputSources() -> [String] {
@@ -214,8 +214,8 @@ private func selectNextInputSource() {
 }
 
 private func selectCJKVInputSource(_ target: String) {
-    guard hasAccessibilityPermission(promptIfNeeded: true) else {
-        log("Accessibility permission is missing; rebinding the input context instead of posting the switch shortcut")
+    requestAccessibilityPermissionIfNeeded()
+    guard workaroundFailures < workaroundFailureLimit else {
         forceSelectInputSource(target)
         return
     }
@@ -229,6 +229,11 @@ private func selectCJKVInputSource(_ target: String) {
     performWorkaroundSelection(target, intermediate: intermediate, attemptsRemaining: 1)
 }
 
+// Consecutive failures stop the attempt so a machine without the permission
+// does not pay the extra delay on every switch.
+private let workaroundFailureLimit = 3
+private var workaroundFailures = 0
+
 // TISSelectInputSource sometimes fails to switch CJKV input sources; only the
 // menu bar changes.  Selecting the target first makes macOS record it as the
 // previous source, and the shortcut then returns to it through the reliable
@@ -240,6 +245,7 @@ private func performWorkaroundSelection(_ target: String, intermediate: String, 
     DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(150)) {
         if currentInputSourceID() == target {
             log("Switched to \(target) through the input source shortcut workaround")
+            workaroundFailures = 0
             finishTransition()
             return
         }
@@ -247,7 +253,11 @@ private func performWorkaroundSelection(_ target: String, intermediate: String, 
             performWorkaroundSelection(target, intermediate: intermediate, attemptsRemaining: attemptsRemaining - 1)
             return
         }
-        log("Workaround did not reach \(target); forcing an input context rebind")
+        workaroundFailures += 1
+        log("Workaround did not reach \(target) (input source shortcut \(AXIsProcessTrusted() ? "allowed" : "blocked"), failure \(workaroundFailures)/\(workaroundFailureLimit)); rebinding the input context")
+        if workaroundFailures >= workaroundFailureLimit {
+            log("Stopping the input source shortcut workaround for this session")
+        }
         forceSelectInputSource(target)
     }
 }
@@ -318,6 +328,17 @@ signal(SIGUSR1, SIG_IGN)
 let signalSource = DispatchSource.makeSignalSource(signal: SIGUSR1, queue: .main)
 signalSource.setEventHandler { selectNextInputSource() }
 signalSource.resume()
+
+// Reports the permission this process actually has, which is the value that
+// decides whether the switch shortcut can be posted:
+//   kill -USR2 $(pgrep MacCJKVInputSwitcher)
+signal(SIGUSR2, SIG_IGN)
+let stateSignalSource = DispatchSource.makeSignalSource(signal: SIGUSR2, queue: .main)
+stateSignalSource.setEventHandler {
+    log("Accessibility permission: \(AXIsProcessTrusted() ? "granted" : "not granted")")
+    log("Current input source: \(currentInputSourceID() ?? "unknown")")
+}
+stateSignalSource.resume()
 
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
